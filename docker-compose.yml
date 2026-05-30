@@ -1,0 +1,11 @@
+services:
+  money-app:
+    image: money-app:latest
+    build:
+      context: ..          # build from the money-app repo root
+      dockerfile: infra/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    labels:
+      - "com.docker.compose.project=money-app"
