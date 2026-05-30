@@ -7,16 +7,25 @@
 #   2. Downloads a Debian 12 LXC template (if not already cached)
 #   3. Creates and starts the container
 #   4. Installs Nginx + Node.js inside it
-#   5. Clones and builds the app
+#   5. Clones, builds, and starts the app (frontend + API server)
 #   6. Prints the URL when done
 #
 # Usage:
 #   cp config.env.example config.env   # fill in your values first
-#   bash lxc-setup.sh
+#   bash lxc-setup.sh                  # create (skip if container exists)
+#   bash lxc-setup.sh --recreate       # destroy existing and start fresh
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RECREATE=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --recreate) RECREATE=true ;;
+    *) echo "Unknown argument: $arg"; exit 1 ;;
+  esac
+done
 
 if [[ ! -f "$SCRIPT_DIR/config.env" ]]; then
   echo "ERROR: config.env not found. Copy config.env.example and fill it in."
@@ -34,6 +43,7 @@ echo "    Proxmox host : $PROXMOX_HOST"
 echo "    Container ID : $CT_ID ($CT_HOSTNAME)"
 echo "    Storage      : $CT_STORAGE"
 echo "    Network IP   : $CT_IP"
+[[ "$RECREATE" == "true" ]] && echo "    Mode         : --recreate (existing container will be destroyed)"
 echo ""
 
 # ── 1. Create the container on the Proxmox host ────────────────────────────
@@ -42,9 +52,22 @@ echo "→ Step 1/3: Creating container on Proxmox..."
 "${SSH[@]}" bash -s << PROXMOX
 set -euo pipefail
 
+# Destroy existing container if --recreate was passed
+if [[ "$RECREATE" == "true" ]]; then
+  if pct status $CT_ID &>/dev/null; then
+    echo "   --recreate: stopping and destroying container $CT_ID..."
+    pct stop $CT_ID --timeout 10 2>/dev/null || true
+    pct destroy $CT_ID --purge
+    echo "   ✓ Container $CT_ID destroyed"
+  else
+    echo "   --recreate: container $CT_ID does not exist, nothing to destroy"
+  fi
+fi
+
 # Check if container already exists
 if pct status $CT_ID &>/dev/null; then
   echo "   Container $CT_ID already exists — skipping creation"
+  echo "   Tip: use --recreate to destroy and rebuild from scratch"
 else
   # Download Debian 12 template if needed
   echo "   Updating template list..."
@@ -99,7 +122,6 @@ PROXMOX
 # ── 2. Push the init script into the container ─────────────────────────────
 echo "→ Step 2/3: Uploading setup script..."
 
-# Copy script to Proxmox host first, then pct push into container
 scp "${SSH_OPTS[@]}" \
   "$SCRIPT_DIR/scripts/container-init.sh" \
   "$PROXMOX_USER@$PROXMOX_HOST:/tmp/money-init.sh"

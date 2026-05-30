@@ -28,20 +28,54 @@ else
   git clone "$APP_REPO" /opt/money-app
 fi
 
-echo "── Building app ─────────────────────────────────────────────"
+echo "── Installing dependencies ───────────────────────────────────"
 cd /opt/money-app
 mkdir -p client/public
 npm ci --prefix client --silent
+npm ci --prefix server --silent
+
+echo "── Building client ──────────────────────────────────────────"
 npm run build --prefix client
 
 mkdir -p /var/www/html
 cp -r client/dist/. /var/www/html/
+
+echo "── Starting API server ───────────────────────────────────────"
+cat > /etc/systemd/system/money-app-api.service << 'SERVICE'
+[Unit]
+Description=Money App API Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/money-app
+ExecStart=/usr/bin/node server/server.js
+Restart=on-failure
+RestartSec=5
+Environment=PORT=3001
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable money-app-api
+systemctl start money-app-api
+echo "   ✓ API service started on port 3001"
 
 echo "── Configuring Nginx ────────────────────────────────────────"
 
 # Shared location blocks used in all nginx configs
 nginx_locations() {
 cat << 'LOCATIONS'
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        client_max_body_size 50m;
+    }
     location ~* \.wasm$ {
         add_header Content-Type application/wasm;
         expires 30d;
@@ -94,7 +128,6 @@ server {
 NGINX
 
 elif [[ "$SSL_MODE" == "letsencrypt" ]]; then
-  # certbot will reconfigure nginx to add port 443 after we start on port 80
   if [[ -z "$DOMAIN" || -z "$CERTBOT_EMAIL" ]]; then
     echo "ERROR: DOMAIN and CERTBOT_EMAIL must both be set for SSL_MODE=letsencrypt."
     exit 1

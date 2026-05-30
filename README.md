@@ -1,25 +1,27 @@
 # money-app-infra
 
-Deployment scripts for [money-app](https://github.com/feedmittens/money-app) on Proxmox. Creates a Debian 12 LXC container, installs Node.js and Nginx, builds the app, and optionally provisions a Let's Encrypt SSL certificate — all in one command.
+Deployment scripts for [money-app](https://github.com/feedmittens/money-app) on Proxmox. Creates a Debian 12 LXC container, installs Node.js and Nginx, builds and starts the app, and optionally provisions a Let's Encrypt SSL certificate — all in one command.
 
 ## Overview
 
 ```
 Your machine                    Proxmox host
-┌──────────────────┐            ┌─────────────────────────────────┐
-│ lxc-setup.sh     │  SSH ───▶  │  LXC container (Debian 12)      │
-│ deploy.sh        │            │  ├── Nginx  (serves the app)     │
-│ config.env       │            │  ├── Node.js (builds the app)    │
-└──────────────────┘            │  └── /opt/money-app (git clone)  │
-                                └─────────────────────────────────┘
+┌──────────────────┐            ┌─────────────────────────────────────┐
+│ lxc-setup.sh     │  SSH ───▶  │  LXC container (Debian 12)          │
+│ deploy.sh        │            │  ├── Nginx  (static files + proxy)   │
+│ config.env       │            │  ├── Node.js API (port 3001)         │
+└──────────────────┘            │  └── /opt/money-app (git clone)      │
+                                └─────────────────────────────────────┘
 ```
 
 `lxc-setup.sh` is a one-time setup. After that, use `deploy.sh` whenever you push changes to money-app.
 
+**`config.env` contains your private server details and is gitignored — it stays on your machine only.** Never commit it.
+
 ## Prerequisites
 
 - A Proxmox host accessible via SSH
-- SSH key auth set up for the Proxmox root user (password auth also works, you'll just be prompted)
+- SSH key auth set up for the Proxmox root user
 - `bash` and `scp` on your local machine (standard on Linux/macOS)
 
 For SSL, you additionally need:
@@ -50,6 +52,14 @@ bash lxc-setup.sh
 
 Takes about 2 minutes. Prints the URL when done.
 
+**To tear down and rebuild an existing container from scratch:**
+
+```bash
+bash lxc-setup.sh --recreate
+```
+
+This stops and destroys the existing container (CT_ID from config.env), then creates a fresh one. Useful after major infrastructure changes.
+
 ## config.env reference
 
 | Variable | Required | Description |
@@ -62,7 +72,7 @@ Takes about 2 minutes. Prints the URL when done.
 | `CT_STORAGE` | Yes | Storage pool for the container rootfs (e.g. `local-lvm`, `local-zfs`) |
 | `CT_BRIDGE` | Yes | Network bridge (almost always `vmbr0`) |
 | `CT_CORES` | Yes | CPU cores to assign |
-| `CT_MEMORY` | Yes | RAM in MB (512 is plenty) |
+| `CT_MEMORY` | Yes | RAM in MB — 1024 recommended (Node.js runs in production) |
 | `CT_IP` | Yes | `dhcp` for automatic, or a static IP like `192.168.1.200/24` |
 | `CT_GW` | No | Gateway IP — only needed when `CT_IP` is static |
 | `APP_REPO` | Yes | Git URL for money-app |
@@ -101,7 +111,7 @@ DOMAIN=money.yourdomain.com
 CERTBOT_EMAIL=you@yourdomain.com
 ```
 
-**Router setup required:** Forward ports **80** and **443** from your router to the container's IP. If you're using `CT_IP=dhcp`, set a DHCP reservation in your router so the container always gets the same IP.
+**Router setup required:** Forward ports **80** and **443** from your router to the container's IP.
 
 Certbot installs a systemd timer for automatic renewal every 60 days — no manual intervention needed.
 
@@ -123,34 +133,42 @@ cd money-app-infra
 bash deploy.sh
 ```
 
-This pulls the latest code, rebuilds the frontend, and reloads Nginx. Takes about 30 seconds.
+This pulls the latest code, updates dependencies, rebuilds the frontend, restarts the API server, and reloads Nginx. Takes about 30 seconds.
 
-## Cleaning up a partial or broken deployment
+## Cleaning up
 
-If setup failed partway through, destroy the container on Proxmox and start fresh:
+To destroy the container and start fresh:
+
+```bash
+bash lxc-setup.sh --recreate
+```
+
+Or manually on the Proxmox host:
 
 ```bash
 ssh root@<PROXMOX_HOST>
-
-pct stop <CT_ID>      # stop it (if running)
-pct destroy <CT_ID> --purge   # delete container and its disk
+pct stop <CT_ID>
+pct destroy <CT_ID> --purge
 ```
 
-Then re-run `bash lxc-setup.sh` from your local machine.
+Then re-run `bash lxc-setup.sh`.
 
 ## What the scripts do
 
 ### `lxc-setup.sh` (one-time)
 
 1. SSHes into Proxmox
-2. Downloads a Debian 12 LXC template (cached after first use)
-3. Creates and starts the container
-4. Uploads `scripts/container-init.sh` into the container
-5. Runs the init script, which:
+2. Optionally destroys an existing container (`--recreate`)
+3. Downloads a Debian 12 LXC template (cached after first use)
+4. Creates and starts the container
+5. Uploads `scripts/container-init.sh` into the container
+6. Runs the init script, which:
    - Installs Nginx and Node.js 22
    - Clones money-app from GitHub
+   - Installs client and server dependencies
    - Builds the React frontend
-   - Writes an Nginx config and starts the service
+   - Starts the Express API server as a systemd service (port 3001)
+   - Configures Nginx to serve static files and proxy `/api/` to the API server
    - (Optional) Runs certbot for Let's Encrypt SSL
 
 ### `deploy.sh` (run on each update)
@@ -158,7 +176,9 @@ Then re-run `bash lxc-setup.sh` from your local machine.
 1. Uploads `scripts/container-deploy.sh` into the running container
 2. Runs it, which:
    - Pulls latest code from GitHub
+   - Updates client and server dependencies
    - Rebuilds the frontend
+   - Restarts the API server
    - Reloads Nginx
 
 ---
@@ -169,38 +189,41 @@ Then re-run `bash lxc-setup.sh` from your local machine.
 No. Both repos are public. The scripts clone over HTTPS with no authentication required.
 
 **Which Proxmox version does this support?**
-Tested on Proxmox VE 7 and 8. The scripts use standard `pct` commands that haven't changed across versions.
+Tested on Proxmox VE 7 and 8.
 
 **Can I use a different container ID than 200?**
 Yes — set `CT_ID` to any unused number. Check the Proxmox UI (or run `pct list` on the host) to see what's already in use.
 
 **What if my storage isn't `local-lvm`?**
-Change `CT_STORAGE` in `config.env` to match your setup. Run `pvesm status` on the Proxmox host to list available storage pools and their types.
+Change `CT_STORAGE` in `config.env` to match your setup. Run `pvesm status` on the Proxmox host to list available storage pools.
 
 **Can I run multiple containers — e.g. staging and production?**
-Yes. Clone this repo twice (or copy `config.env`) with different `CT_ID` values, different `APP_PORT` values (if not using domains), and run `lxc-setup.sh` for each.
+Yes. Use different `CT_ID` values and different `APP_PORT` values (if not using domains).
 
 **How do I update the SSL certificate manually?**
-For Let's Encrypt, certbot handles this automatically via a systemd timer. To force a renewal:
+For Let's Encrypt, certbot handles this automatically. To force renewal:
 ```bash
 ssh root@<PROXMOX_HOST> "pct exec <CT_ID> -- certbot renew --force-renewal"
 ```
-For self-signed, the cert is valid for 10 years. To regenerate it manually, run the same `openssl req` command from `container-init.sh` inside the container, then `nginx -s reload`.
-
-**My browser doesn't trust the self-signed certificate — how do I fix it?**
-Fetch the `.crt` file from the container and import it into your OS/browser trust store:
-- **Linux (Chrome/Firefox):** Import into your browser's certificate manager under Authorities
-- **macOS:** Double-click the `.crt` and add it to the System keychain, then set it to "Always Trust"
-- **Windows:** Double-click the `.crt` → Install Certificate → Local Machine → Trusted Root Certification Authorities
+For self-signed, the cert is valid for 10 years. Regenerate with the `openssl req` command from `container-init.sh`, then `nginx -s reload`.
 
 **The container got an IP via DHCP — how do I find it?**
 ```bash
 ssh root@<PROXMOX_HOST> "pct exec <CT_ID> -- hostname -I"
 ```
-Or check the Proxmox web UI — it shows the container IP on the Summary tab once it's running.
+Or check the Summary tab in the Proxmox UI.
+
+**My browser doesn't trust the self-signed certificate — how do I fix it?**
+Fetch the `.crt` file and import it into your OS/browser trust store:
+- **Linux (Chrome/Firefox):** Import into your browser's certificate manager under Authorities
+- **macOS:** Double-click the `.crt` → add to System keychain → set to "Always Trust"
+- **Windows:** Double-click the `.crt` → Install Certificate → Local Machine → Trusted Root Certification Authorities
 
 **Can I deploy this somewhere other than Proxmox?**
-The container-init and container-deploy scripts are plain bash and will run on any Debian 12 machine. You can run them directly (without `pct exec`) on any VPS or VM:
+The container scripts are plain bash and run on any Debian 12 machine:
 ```bash
 APP_PORT=8080 APP_REPO=https://github.com/feedmittens/money-app.git bash scripts/container-init.sh
 ```
+
+**Why does my config.env not get committed to git?**
+On purpose. `config.env` contains your private server IP and credentials. It's in `.gitignore` and should stay on your machine only. The `config.env.example` file in the repo shows the structure without any real values.
