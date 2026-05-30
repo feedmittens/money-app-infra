@@ -139,7 +139,19 @@ echo "→ Step 3/3: Installing and building inside container (takes ~2 min)..."
 echo ""
 
 "${SSH[@]}" \
-  "pct exec $CT_ID -- env APP_PORT='$APP_PORT' APP_REPO='$APP_REPO' SSL_MODE='${SSL_MODE:-selfsigned}' DOMAIN='${DOMAIN:-}' CERTBOT_EMAIL='${CERTBOT_EMAIL:-}' bash /tmp/money-init.sh"
+  "pct exec $CT_ID -- env \
+    APP_PORT='$APP_PORT' \
+    APP_REPO='$APP_REPO' \
+    SSL_MODE='${SSL_MODE:-selfsigned}' \
+    DOMAIN='${DOMAIN:-}' \
+    CERTBOT_EMAIL='${CERTBOT_EMAIL:-}' \
+    ADMIN_EMAIL='${ADMIN_EMAIL:-}' \
+    DB_PASSWORD='${DB_PASSWORD:-changeme}' \
+    SESSION_SECRET='${SESSION_SECRET:-}' \
+    APP_URL='${APP_URL:-}' \
+    GOOGLE_CLIENT_ID='${GOOGLE_CLIENT_ID:-}' \
+    GOOGLE_CLIENT_SECRET='${GOOGLE_CLIENT_SECRET:-}' \
+    bash /tmp/money-init.sh"
 
 # ── Done ───────────────────────────────────────────────────────────────────
 CONTAINER_IP=$("${SSH[@]}" "pct exec $CT_ID -- hostname -I 2>/dev/null | awk '{print \$1}'")

@@ -11,8 +11,7 @@ CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
 
 echo "── Installing packages ──────────────────────────────────────"
 apt-get update -qq
-# build-essential + python3 are required to compile better-sqlite3 (native Node module)
-apt-get install -y -qq curl git nginx ca-certificates openssl build-essential python3
+apt-get install -y -qq curl git nginx ca-certificates openssl postgresql postgresql-client python3
 
 echo "── Installing Node.js 22 ────────────────────────────────────"
 if ! command -v node &>/dev/null; then
@@ -20,6 +19,19 @@ if ! command -v node &>/dev/null; then
   apt-get install -y -qq nodejs
 fi
 echo "   node $(node --version) / npm $(npm --version)"
+
+echo "── Setting up PostgreSQL ────────────────────────────────────"
+systemctl enable postgresql
+systemctl start postgresql
+
+# Create DB user and database if they don't exist
+sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='bvmoney'" | grep -q 1 || \
+  sudo -u postgres psql -c "CREATE USER bvmoney WITH PASSWORD '${DB_PASSWORD:-changeme}';"
+
+sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='bvmoney'" | grep -q 1 || \
+  sudo -u postgres createdb -O bvmoney bvmoney
+
+echo "   ✓ PostgreSQL ready (db: bvmoney, user: bvmoney)"
 
 echo "── Cloning app ──────────────────────────────────────────────"
 if [ -d /opt/money-app/.git ]; then
@@ -41,9 +53,29 @@ npm run build --prefix client
 mkdir -p /var/www/html
 cp -r client/dist/. /var/www/html/
 
+echo "── Running database schema ───────────────────────────────────"
+sudo -u postgres psql -d bvmoney -f /opt/money-app/server/schema.sql
+echo "   ✓ Schema applied"
+
+echo "── Writing server .env ───────────────────────────────────────"
+DB_PASSWORD="${DB_PASSWORD:-changeme}"
+SESSION_SECRET="${SESSION_SECRET:-$(openssl rand -hex 32)}"
+cat > /opt/money-app/server/.env << ENV
+NODE_ENV=production
+PORT=3001
+DATABASE_URL=postgresql://bvmoney:${DB_PASSWORD}@localhost:5432/bvmoney
+SESSION_SECRET=${SESSION_SECRET}
+ADMIN_EMAIL=${ADMIN_EMAIL:-}
+APP_URL=${APP_URL:-}
+GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+ENV
+chmod 600 /opt/money-app/server/.env
+echo "   ✓ .env written (SESSION_SECRET auto-generated if not provided)"
+
 echo "── Starting API server ───────────────────────────────────────"
 NODE_BIN=$(which node)
-printf '[Unit]\nDescription=Money App API Server\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=/opt/money-app\nExecStart=%s /opt/money-app/server/server.js\nRestart=on-failure\nRestartSec=5\nEnvironment=PORT=3001\nEnvironment=NODE_ENV=production\n\n[Install]\nWantedBy=multi-user.target\n' "$NODE_BIN" \
+printf '[Unit]\nDescription=BV Money API Server\nAfter=network.target postgresql.service\n\n[Service]\nType=simple\nWorkingDirectory=/opt/money-app\nExecStart=%s /opt/money-app/server/server.js\nRestart=on-failure\nRestartSec=5\nEnvironmentFile=/opt/money-app/server/.env\n\n[Install]\nWantedBy=multi-user.target\n' "$NODE_BIN" \
   > /etc/systemd/system/money-app-api.service
 
 systemctl daemon-reload
