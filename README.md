@@ -66,30 +66,53 @@ Takes about 2 minutes. Prints the URL when done.
 | `CT_IP` | Yes | `dhcp` for automatic, or a static IP like `192.168.1.200/24` |
 | `CT_GW` | No | Gateway IP — only needed when `CT_IP` is static |
 | `APP_REPO` | Yes | Git URL for money-app |
-| `APP_PORT` | Yes | Port to serve the app on (ignored when `DOMAIN` is set) |
-| `DOMAIN` | No | Domain name for SSL — leave blank for plain HTTP |
-| `CERTBOT_EMAIL` | No | Email for Let's Encrypt notifications — required if `DOMAIN` is set |
+| `APP_PORT` | Yes | Port for plain HTTP (only used when `SSL_MODE=none`) |
+| `SSL_MODE` | No | `selfsigned` (default), `letsencrypt`, or `none` |
+| `DOMAIN` | No | Domain name — required for `letsencrypt`; optional CN for `selfsigned` |
+| `CERTBOT_EMAIL` | No | Email for Let's Encrypt notifications — required for `letsencrypt` |
 
 **Finding your CT_STORAGE value:** In the Proxmox web UI go to Datacenter → Storage. The name in the ID column is what to use. Common values: `local-lvm` (LVM-thin), `local-zfs` (ZFS), `local` (directory storage).
 
-## SSL / Let's Encrypt
+## SSL modes
 
-Fill in `DOMAIN` and `CERTBOT_EMAIL` in `config.env` before running `lxc-setup.sh`:
+### Self-signed (default)
+
+Works on any network — no domain, no internet access required. Ideal for internal or air-gapped servers.
 
 ```bash
+SSL_MODE=selfsigned   # this is already the default, no change needed
+```
+
+Setup generates a 10-year RSA certificate with the container's IP as a SAN. Nginx listens on 443 and redirects port 80 to HTTPS automatically. Your browser will show a one-time security warning — click through it, or add the certificate to your OS/browser trust store for a cleaner experience.
+
+After setup, fetch the cert to import into your browser or OS:
+
+```bash
+ssh root@<PROXMOX_HOST> "pct exec <CT_ID> -- cat /etc/nginx/ssl/money-app.crt"
+```
+
+### Let's Encrypt
+
+For servers with a public domain and internet access. Issues a fully trusted certificate with automatic renewal.
+
+```bash
+SSL_MODE=letsencrypt
 DOMAIN=money.yourdomain.com
 CERTBOT_EMAIL=you@yourdomain.com
 ```
 
-What happens automatically:
-- Certbot is installed inside the container
-- A certificate is issued for your domain
-- Nginx is configured for HTTPS with HTTP → HTTPS redirect
-- A systemd timer handles renewal every 60 days — no manual intervention needed
-
 **Router setup required:** Forward ports **80** and **443** from your router to the container's IP. If you're using `CT_IP=dhcp`, set a DHCP reservation in your router so the container always gets the same IP.
 
-If you leave `DOMAIN` blank, the app is served over plain HTTP on `APP_PORT` (default 8080). You can add SSL later by re-running setup on a fresh container.
+Certbot installs a systemd timer for automatic renewal every 60 days — no manual intervention needed.
+
+### Plain HTTP
+
+```bash
+SSL_MODE=none
+APP_PORT=8080
+```
+
+No HTTPS. Access via `http://<container-ip>:8080`.
 
 ## Deploying updates
 
@@ -158,10 +181,17 @@ Change `CT_STORAGE` in `config.env` to match your setup. Run `pvesm status` on t
 Yes. Clone this repo twice (or copy `config.env`) with different `CT_ID` values, different `APP_PORT` values (if not using domains), and run `lxc-setup.sh` for each.
 
 **How do I update the SSL certificate manually?**
-Certbot handles this automatically via a systemd timer. To force a renewal:
+For Let's Encrypt, certbot handles this automatically via a systemd timer. To force a renewal:
 ```bash
 ssh root@<PROXMOX_HOST> "pct exec <CT_ID> -- certbot renew --force-renewal"
 ```
+For self-signed, the cert is valid for 10 years. To regenerate it manually, run the same `openssl req` command from `container-init.sh` inside the container, then `nginx -s reload`.
+
+**My browser doesn't trust the self-signed certificate — how do I fix it?**
+Fetch the `.crt` file from the container and import it into your OS/browser trust store:
+- **Linux (Chrome/Firefox):** Import into your browser's certificate manager under Authorities
+- **macOS:** Double-click the `.crt` and add it to the System keychain, then set it to "Always Trust"
+- **Windows:** Double-click the `.crt` → Install Certificate → Local Machine → Trusted Root Certification Authorities
 
 **The container got an IP via DHCP — how do I find it?**
 ```bash

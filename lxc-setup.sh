@@ -112,20 +112,31 @@ echo "→ Step 3/3: Installing and building inside container (takes ~2 min)..."
 echo ""
 
 "${SSH[@]}" \
-  "pct exec $CT_ID -- env APP_PORT='$APP_PORT' APP_REPO='$APP_REPO' DOMAIN='${DOMAIN:-}' CERTBOT_EMAIL='${CERTBOT_EMAIL:-}' bash /tmp/money-init.sh"
+  "pct exec $CT_ID -- env APP_PORT='$APP_PORT' APP_REPO='$APP_REPO' SSL_MODE='${SSL_MODE:-selfsigned}' DOMAIN='${DOMAIN:-}' CERTBOT_EMAIL='${CERTBOT_EMAIL:-}' bash /tmp/money-init.sh"
 
 # ── Done ───────────────────────────────────────────────────────────────────
+CONTAINER_IP=$("${SSH[@]}" "pct exec $CT_ID -- hostname -I 2>/dev/null | awk '{print \$1}'")
+
 echo ""
 echo "════════════════════════════════════════"
 echo "  ✓ Setup complete!"
 echo ""
 echo "  Open in browser:"
-if [[ -n "${DOMAIN:-}" ]]; then
-  echo "  https://$DOMAIN"
-else
-  CONTAINER_IP=$("${SSH[@]}" "pct exec $CT_ID -- hostname -I 2>/dev/null | awk '{print \$1}'")
-  echo "  http://$CONTAINER_IP:$APP_PORT"
-fi
+case "${SSL_MODE:-selfsigned}" in
+  letsencrypt)
+    echo "  https://$DOMAIN"
+    ;;
+  selfsigned)
+    echo "  https://$CONTAINER_IP"
+    echo ""
+    echo "  Your browser will warn about the self-signed certificate."
+    echo "  To trust it, fetch the cert from the container:"
+    echo "  ssh $PROXMOX_USER@$PROXMOX_HOST 'pct exec $CT_ID -- cat /etc/nginx/ssl/money-app.crt'"
+    ;;
+  *)
+    echo "  http://$CONTAINER_IP:$APP_PORT"
+    ;;
+esac
 echo ""
 echo "  To update the app later:"
 echo "  bash deploy.sh"
