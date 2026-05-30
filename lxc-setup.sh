@@ -56,7 +56,12 @@ set -euo pipefail
 if [[ "$RECREATE" == "true" ]]; then
   if pct status $CT_ID &>/dev/null; then
     echo "   --recreate: stopping and destroying container $CT_ID..."
-    pct stop $CT_ID --timeout 10 2>/dev/null || true
+    pct stop $CT_ID 2>/dev/null || true
+    # Wait up to 30 seconds for the container to fully stop before destroying
+    for i in \$(seq 1 30); do
+      [[ "\$(pct status $CT_ID 2>/dev/null)" == "status: stopped" ]] && break
+      sleep 1
+    done
     pct destroy $CT_ID --purge
     echo "   ✓ Container $CT_ID destroyed"
   else
