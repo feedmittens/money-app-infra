@@ -112,7 +112,7 @@ echo "→ Step 3/3: Installing and building inside container (takes ~2 min)..."
 echo ""
 
 "${SSH[@]}" \
-  "pct exec $CT_ID -- env APP_PORT='$APP_PORT' APP_REPO='$APP_REPO' GITHUB_TOKEN='${GITHUB_TOKEN:-}' bash /tmp/money-init.sh"
+  "pct exec $CT_ID -- env APP_PORT='$APP_PORT' APP_REPO='$APP_REPO' bash /tmp/money-init.sh"
 
 # ── Done ───────────────────────────────────────────────────────────────────
 CONTAINER_IP=$("${SSH[@]}" "pct exec $CT_ID -- hostname -I 2>/dev/null | awk '{print \$1}'")

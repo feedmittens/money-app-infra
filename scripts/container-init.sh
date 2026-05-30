@@ -18,28 +18,11 @@ fi
 echo "   node $(node --version) / npm $(npm --version)"
 
 echo "── Cloning app ──────────────────────────────────────────────"
-# If a GitHub token is provided, embed it in the URL for auth.
-# After cloning the token is stripped from the stored remote URL.
-CLONE_URL="$APP_REPO"
-if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-  CLONE_URL="${APP_REPO/https:\/\//https://x-access-token:${GITHUB_TOKEN}@}"
-fi
-
 if [ -d /opt/money-app/.git ]; then
   cd /opt/money-app
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    git -C . config credential.helper \
-      "!f() { echo username=x-access-token; echo password=${GITHUB_TOKEN}; }; f"
-  fi
   git pull --ff-only
 else
-  git clone "$CLONE_URL" /opt/money-app
-  # Strip the token from the stored remote so it isn't sitting in .git/config
-  git -C /opt/money-app remote set-url origin "$APP_REPO"
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    git -C /opt/money-app config credential.helper \
-      "!f() { echo username=x-access-token; echo password=${GITHUB_TOKEN}; }; f"
-  fi
+  git clone "$APP_REPO" /opt/money-app
 fi
 
 echo "── Building app ─────────────────────────────────────────────"

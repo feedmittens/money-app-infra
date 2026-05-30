@@ -35,7 +35,7 @@ scp "${SSH_OPTS[@]}" \
   "$PROXMOX_USER@$PROXMOX_HOST:/tmp/money-deploy.sh"
 
 "${SSH[@]}" "pct push $CT_ID /tmp/money-deploy.sh /tmp/money-deploy.sh"
-"${SSH[@]}" "pct exec $CT_ID -- env GITHUB_TOKEN='${GITHUB_TOKEN:-}' bash /tmp/money-deploy.sh"
+"${SSH[@]}" "pct exec $CT_ID -- bash /tmp/money-deploy.sh"
 
 CONTAINER_IP=$("${SSH[@]}" "pct exec $CT_ID -- hostname -I 2>/dev/null | awk '{print \$1}'")
 echo ""

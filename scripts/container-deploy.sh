@@ -5,10 +5,6 @@ set -euo pipefail
 
 echo "── Pulling latest code ──────────────────────────────────────"
 cd /opt/money-app
-if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-  git config credential.helper \
-    "!f() { echo username=x-access-token; echo password=${GITHUB_TOKEN}; }; f"
-fi
 git pull --ff-only
 
 echo "── Rebuilding app ───────────────────────────────────────────"
