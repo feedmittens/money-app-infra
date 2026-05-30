@@ -12,7 +12,7 @@ npm ci --prefix client --silent
 npm ci --prefix server --silent
 
 echo "── Applying schema migrations ───────────────────────────────"
-sudo -u postgres psql -d bvmoney -f /opt/money-app/server/schema.sql
+su -s /bin/bash postgres -c "psql -d bvmoney -f /opt/money-app/server/schema.sql"
 echo "   ✓ Schema up to date"
 
 echo "── Rebuilding client ────────────────────────────────────────"

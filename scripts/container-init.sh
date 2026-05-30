@@ -24,12 +24,12 @@ echo "── Setting up PostgreSQL ───────────────
 systemctl enable postgresql
 systemctl start postgresql
 
-# Create DB user and database if they don't exist
-sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='bvmoney'" | grep -q 1 || \
-  sudo -u postgres psql -c "CREATE USER bvmoney WITH PASSWORD '${DB_PASSWORD:-changeme}';"
+# Running as root inside the container — use su to switch to the postgres user
+su -s /bin/bash postgres -c "psql -tc \"SELECT 1 FROM pg_roles WHERE rolname='bvmoney'\"" | grep -q 1 || \
+  su -s /bin/bash postgres -c "psql -c \"CREATE USER bvmoney WITH PASSWORD '${DB_PASSWORD:-changeme}';\""
 
-sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='bvmoney'" | grep -q 1 || \
-  sudo -u postgres createdb -O bvmoney bvmoney
+su -s /bin/bash postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname='bvmoney'\"" | grep -q 1 || \
+  su -s /bin/bash postgres -c "createdb -O bvmoney bvmoney"
 
 echo "   ✓ PostgreSQL ready (db: bvmoney, user: bvmoney)"
 
@@ -54,7 +54,7 @@ mkdir -p /var/www/html
 cp -r client/dist/. /var/www/html/
 
 echo "── Running database schema ───────────────────────────────────"
-sudo -u postgres psql -d bvmoney -f /opt/money-app/server/schema.sql
+su -s /bin/bash postgres -c "psql -d bvmoney -f /opt/money-app/server/schema.sql"
 echo "   ✓ Schema applied"
 
 echo "── Writing server .env ───────────────────────────────────────"
