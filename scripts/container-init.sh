@@ -11,7 +11,8 @@ CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
 
 echo "── Installing packages ──────────────────────────────────────"
 apt-get update -qq
-apt-get install -y -qq curl git nginx ca-certificates openssl
+# build-essential + python3 are required to compile better-sqlite3 (native Node module)
+apt-get install -y -qq curl git nginx ca-certificates openssl build-essential python3
 
 echo "── Installing Node.js 22 ────────────────────────────────────"
 if ! command -v node &>/dev/null; then
@@ -41,23 +42,9 @@ mkdir -p /var/www/html
 cp -r client/dist/. /var/www/html/
 
 echo "── Starting API server ───────────────────────────────────────"
-cat > /etc/systemd/system/money-app-api.service << 'SERVICE'
-[Unit]
-Description=Money App API Server
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/money-app
-ExecStart=/usr/bin/node server/server.js
-Restart=on-failure
-RestartSec=5
-Environment=PORT=3001
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
+NODE_BIN=$(which node)
+printf '[Unit]\nDescription=Money App API Server\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=/opt/money-app\nExecStart=%s /opt/money-app/server/server.js\nRestart=on-failure\nRestartSec=5\nEnvironment=PORT=3001\nEnvironment=NODE_ENV=production\n\n[Install]\nWantedBy=multi-user.target\n' "$NODE_BIN" \
+  > /etc/systemd/system/money-app-api.service
 
 systemctl daemon-reload
 systemctl enable money-app-api
