@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: money-app-db
+    environment:
+      POSTGRES_USER: bvmoney
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: bvmoney
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bvmoney"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - money-app-network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: money-app-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3001
+      DATABASE_URL: postgresql://bvmoney:${DB_PASSWORD:-changeme}@postgres:5432/bvmoney
+      SESSION_SECRET: ${SESSION_SECRET:-$(openssl rand -hex 32)}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      APP_URL: ${APP_URL:-http://localhost}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      SSL_MODE: ${SSL_MODE:-selfsigned}
+      DOMAIN: ${DOMAIN:-}
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
+    volumes:
+      - ./client:/opt/money-app/client
+      - ./server:/opt/money-app/server
+    ports:
+      - "${APP_PORT:-8080}:${APP_PORT:-8080}"
+      - "443:443"
+    networks:
+      - money-app-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  money-app-network:
+    driver: bridge
