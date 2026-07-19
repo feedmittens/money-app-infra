@@ -20,6 +20,18 @@ if ! command -v node &>/dev/null; then
 fi
 echo "   node $(node --version) / npm $(npm --version)"
 
+echo "── Installing GitHub CLI (gh) ───────────────────────────────"
+if ! command -v gh &>/dev/null; then
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+  chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+  apt-get update -qq
+  apt-get install -y -qq gh
+fi
+echo "   gh $(gh --version | head -1)"
+
 echo "── Setting up PostgreSQL ────────────────────────────────────"
 systemctl enable postgresql
 systemctl start postgresql
