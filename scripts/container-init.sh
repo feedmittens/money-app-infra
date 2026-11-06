@@ -95,6 +95,62 @@ systemctl enable money-app-api
 systemctl start money-app-api
 echo "   ✓ API service started on port 3001"
 
+echo "── Setting up scheduled jobs (bill auto-post, Plaid sync) ───"
+# Both scripts existed in the repo before this was wired up anywhere — bills
+# with auto_post never actually auto-posted, and Plaid connections only ever
+# synced when a user clicked "Sync All" in Settings. Daily auto-post,
+# 4x-daily Plaid sync (accounts can go stale within a day otherwise).
+cat > /etc/systemd/system/money-app-autopost.service << 'UNIT'
+[Unit]
+Description=Tally — auto-post due bills
+After=money-app-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/money-app
+ExecStart=/usr/bin/node /opt/money-app/server/scripts/auto-post-bills.js
+UNIT
+
+cat > /etc/systemd/system/money-app-autopost.timer << 'UNIT'
+[Unit]
+Description=Daily Tally bill auto-post
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+cat > /etc/systemd/system/money-app-plaid-sync.service << 'UNIT'
+[Unit]
+Description=Tally — sync Plaid transactions
+After=money-app-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/money-app
+ExecStart=/usr/bin/node /opt/money-app/server/scripts/auto-sync-plaid.js
+UNIT
+
+cat > /etc/systemd/system/money-app-plaid-sync.timer << 'UNIT'
+[Unit]
+Description=Tally Plaid sync, 4x daily
+
+[Timer]
+OnCalendar=*-*-* 06,12,18,00:15:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now money-app-autopost.timer
+systemctl enable --now money-app-plaid-sync.timer
+echo "   ✓ Timers enabled: money-app-autopost.timer (daily 06:00), money-app-plaid-sync.timer (4x daily)"
+
 echo "── Configuring Nginx ────────────────────────────────────────"
 
 # Shared location blocks used in all nginx configs
